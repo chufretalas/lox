@@ -2,22 +2,16 @@
 
 #include "common.h"
 #include "compiler.h"
-#include "vm.h"
 #include "debug.h"
-
+#include "vm.h"
 
 VM vm;
 
-static void resetStack() {
-    vm.stackTop = vm.stack;
-}
+static void resetStack() { vm.stackTop = vm.stack; }
 
-void initVM() {
-    resetStack();
-}
+void initVM() { resetStack(); }
 
-void freeVM() {
-}
+void freeVM() {}
 
 void push(Value value) {
     *vm.stackTop = value;
@@ -29,62 +23,66 @@ Value pop() {
     return *vm.stackTop;
 }
 
-
 static InterpretResult run() {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 #define READ_CONSTANT_FROM(index) (vm.chunk->constants.values[index])
-#define READ_24BIT() ( \
-    vm.ip += 3, \
-    (uint32_t)(vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)) \
-)
+#define READ_24BIT()                                                           \
+    (vm.ip += 3, (uint32_t)(vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)))
     // Modifying the ninary result in place to avoid a pop and push
-#define BINARY_OP(op) \
-do { \
-    double b = pop(); \
-    *(vm.stackTop - 1) = *(vm.stackTop - 1) op b; \
-} while (false)
+#define BINARY_OP(op)                                                          \
+    do {                                                                       \
+        double b = pop();                                                      \
+        *(vm.stackTop - 1) = *(vm.stackTop - 1) op b;                          \
+    } while (false)
 
-for (;;) {
+    for (;;) {
 #ifdef DEBUG_TRACE_EXECUTION
-    printf(" ");
-    for (Value* slot = vm.stack; slot < vm.stackTop; slot++) {
-        printf("[ ");
-        printValue(*slot);
-        printf(" ]");
-    }
-    printf("\n");
-
-    disassembleInstruction(vm.chunk,
-        (int)(vm.ip - vm.chunk->code));
-#endif
-    uint8_t instruction;
-    switch (instruction = READ_BYTE()) {
-    case OP_CONSTANT: {
-        Value constant = READ_CONSTANT();
-        push(constant);
-        break;
-    }
-    case OP_CONSTANT_LONG: {
-        uint32_t constantIdx = READ_24BIT();
-        Value constant = READ_CONSTANT_FROM(constantIdx);
-        push(constant);
-        break;
-    }
-    case OP_ADD:      BINARY_OP(+); break;
-    case OP_SUBTRACT: BINARY_OP(-); break;
-    case OP_MULTIPLY: BINARY_OP(*); break;
-    case OP_DIVIDE:   BINARY_OP(/); break;
-    case OP_NEGATE:
-        *(vm.stackTop - 1) = -*(vm.stackTop - 1);
-        break;
-    case OP_RETURN: {
-        printValue(pop());
+        printf(" ");
+        for (Value *slot = vm.stack; slot < vm.stackTop; slot++) {
+            printf("[ ");
+            printValue(*slot);
+            printf(" ]");
+        }
         printf("\n");
-        return INTERPRET_OK;
+
+        disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
+#endif
+        uint8_t instruction;
+        switch (instruction = READ_BYTE()) {
+        case OP_CONSTANT: {
+            Value constant = READ_CONSTANT();
+            push(constant);
+            break;
+        }
+        case OP_CONSTANT_LONG: {
+            uint32_t constantIdx = READ_24BIT();
+            Value constant = READ_CONSTANT_FROM(constantIdx);
+            push(constant);
+            break;
+        }
+        case OP_ADD:
+            BINARY_OP(+);
+            break;
+        case OP_SUBTRACT:
+            BINARY_OP(-);
+            break;
+        case OP_MULTIPLY:
+            BINARY_OP(*);
+            break;
+        case OP_DIVIDE:
+            BINARY_OP(/);
+            break;
+        case OP_NEGATE:
+            *(vm.stackTop - 1) = -*(vm.stackTop - 1);
+            break;
+        case OP_RETURN: {
+            printValue(pop());
+            printf("\n");
+            return INTERPRET_OK;
+        }
+        }
     }
-    }
-}
 
 #undef READ_BYTE
 #undef READ_CONSTANT
@@ -93,7 +91,20 @@ for (;;) {
 #undef BINARY_OP
 }
 
-InterpretResult interpret(const char* source) {
-  compile(source);
-  return INTERPRET_OK;
+InterpretResult interpret(const char *source) {
+    Chunk chunk;
+    initChunk(&chunk);
+
+    if (!compile(source, &chunk)) {
+        freeChunk(&chunk);
+        return INTERPRET_COMPILE_ERROR;
+    }
+
+    vm.chunk = &chunk;
+    vm.ip = vm.chunk->code;
+
+    InterpretResult result = run();
+
+    freeChunk(&chunk);
+    return result;
 }
