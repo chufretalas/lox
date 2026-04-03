@@ -4,8 +4,9 @@
 #include "chunk.h"
 #include "table.h"
 #include "value.h"
+#include "common.h"
 
-#define STACK_MAX 4096
+#define STACK_MAX (UINT16_COUNT + 256)
 
 typedef struct {
     Chunk *chunk;
