@@ -31,7 +31,7 @@ static int bit24Instruction(const char *name, Chunk *chunk, int offset) {
     uint32_t slot = slot1 | (slot2 << 8) | (slot3 << 16);
 
     printf("%-16s %4d\n", name, slot);
-    return offset + 2;
+    return offset + 4;
 }
 
 static int jumpInstruction(const char *name, int sign, Chunk *chunk,
@@ -136,6 +136,8 @@ int disassembleInstruction(Chunk *chunk, int offset) {
         return jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset);
     case OP_LOOP:
         return jumpInstruction("OP_LOOP", -1, chunk, offset);
+    case OP_CALL:
+        return byteInstruction("OP_CALL", chunk, offset);
     case OP_RETURN:
         return simpleInstruction("OP_RETURN", offset);
     default:
