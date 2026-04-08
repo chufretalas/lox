@@ -1,0 +1,11 @@
+class Breakfast {}
+
+var meal = Breakfast();
+meal.food = "Toast";
+meal.drink = "Coffee";
+
+print meal.food;   // Expect: Toast
+print meal.drink;  // Expect: Coffee
+
+meal.food = "Eggs";
+print meal.food;   // Expect: Eggs
