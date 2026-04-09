@@ -161,6 +161,12 @@ int disassembleInstruction(Chunk *chunk, int offset) {
         return simpleInstruction("OP_RETURN", offset);
     case OP_CLASS:
         return constantInstruction("OP_CLASS", chunk, offset);
+    case OP_CLASS_LONG:
+        return constantInstructionLong("OP_CLASS_LONG", chunk, offset);
+    case OP_METHOD:
+        return constantInstruction("OP_METHOD", chunk, offset);
+    case OP_METHOD_LONG:
+        return constantInstructionLong("OP_METHOD_LONG", chunk, offset);
     case OP_CLOSURE: {
         offset++;
         uint8_t constant = chunk->code[offset++];
@@ -173,6 +179,33 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             int isLocal = chunk->code[offset++];
             int index = chunk->code[offset++];
             printf("%04d | %s %d\n", offset - 2, isLocal ? "local" : "upvalue",
+                   index);
+        }
+
+        return offset;
+    }
+    case OP_CLOSURE_LONG: {
+        offset++;
+        uint8_t constant1 = chunk->code[offset];
+        uint8_t constant2 = chunk->code[offset + 1];
+        uint8_t constant3 = chunk->code[offset + 2];
+
+        uint32_t constant = constant1 | (constant2 << 8) | (constant3 << 16);
+
+        offset += 3;
+        printf("%-16s %4d ", "OP_CLOSURE_LONG", constant);
+        printValue(chunk->constants.values[constant]);
+        printf("\n");
+
+        ObjFunction *function = AS_FUNCTION(chunk->constants.values[constant]);
+        for (int j = 0; j < function->upvalueCount; j++) {
+            int isLocal = chunk->code[offset++];
+
+            int index = chunk->code[offset] | (chunk->code[offset + 1] << 8) |
+                        (chunk->code[offset + 2] << 16);
+            offset += 3;
+
+            printf("%04d | %s %d\n", offset - 4, isLocal ? "local" : "upvalue",
                    index);
         }
 

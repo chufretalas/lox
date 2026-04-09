@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,7 +54,12 @@ typedef struct {
     bool isLocal;
 } Upvalue;
 
-typedef enum { TYPE_FUNCTION, TYPE_SCRIPT } FunctionType;
+typedef enum {
+    TYPE_FUNCTION,
+    TYPE_INITIALIZER,
+    TYPE_METHOD,
+    TYPE_SCRIPT
+} FunctionType;
 
 typedef struct Compiler {
     struct Compiler *enclosing;
@@ -66,9 +72,14 @@ typedef struct Compiler {
     int scopeDepth;
 } Compiler;
 
+typedef struct ClassCompiler {
+    struct ClassCompiler *enclosing;
+} ClassCompiler;
+
 Parser parser;
 
 Compiler *current = NULL;
+ClassCompiler *currentClass = NULL;
 
 static Chunk *currentChunk() { return &current->function->chunk; }
 
@@ -166,8 +177,13 @@ static void initCompiler(Compiler *compiler, FunctionType type) {
     Local *local = &current->locals[current->localCount++];
     local->depth = 0;
     local->isCaptured = false;
-    local->name.start = "";
-    local->name.length = 0;
+    if (type != TYPE_FUNCTION) {
+        local->name.start = "this";
+        local->name.length = 4;
+    } else {
+        local->name.start = "";
+        local->name.length = 0;
+    }
 }
 
 static void emitBytes(uint8_t byte1, uint8_t byte2) {
@@ -197,7 +213,11 @@ static int emitJump(uint8_t instruction) {
 }
 
 static void emitReturn() {
-    emitByte(OP_NIL);
+    if (current->type == TYPE_INITIALIZER) {
+        emitBytes(OP_GET_LOCAL, 0);
+    } else {
+        emitByte(OP_NIL);
+    }
     emitByte(OP_RETURN);
 }
 
@@ -432,6 +452,14 @@ static void variable(bool canAssign) {
     namedVariable(parser.previous, canAssign);
 }
 
+static void this_(bool canAssign) {
+    if (currentClass == NULL) {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+    variable(false);
+}
+
 static void unary(bool canAssign) {
     TokenType operatorType = parser.previous.type;
 
@@ -487,7 +515,7 @@ ParseRule rules[] = {
   [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
   [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
   [TOKEN_SUPER]         = {NULL,     NULL,   PREC_NONE},
-  [TOKEN_THIS]          = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_THIS]          = {this_,    NULL,   PREC_NONE},
   [TOKEN_TRUE]          = {literal,  NULL,   PREC_NONE},
   [TOKEN_VAR]           = {NULL,     NULL,   PREC_NONE},
   [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},
@@ -576,7 +604,7 @@ static int resolveUpvalue(Compiler *compiler, Token *name) {
 
     int upvalue = resolveUpvalue(compiler->enclosing, name);
     if (upvalue != -1) {
-        return addUpvalue(compiler, (uint8_t)upvalue, false);
+        return addUpvalue(compiler, (uint32_t)upvalue, false);
     }
 
     return -1;
@@ -697,7 +725,7 @@ static void function(FunctionType type) {
             if (current->function->arity > 255) {
                 errorAtCurrent("Can't have more than 255 parameters.");
             }
-            uint8_t constant = parseVariable("Expect parameter name.");
+            uint32_t constant = parseVariable("Expect parameter name.");
             defineVariable(constant);
         } while (match(TOKEN_COMMA));
     }
@@ -706,27 +734,93 @@ static void function(FunctionType type) {
     block();
 
     ObjFunction *function = endCompiler();
-    emitBytes(OP_CLOSURE, makeConstant(OBJ_VAL(function)));
+    uint32_t functionConstant = makeConstant(OBJ_VAL(function));
+
+    // Check if we need the LONG opcode
+    bool isLongClosure = functionConstant > 255;
+    for (int i = 0; i < function->upvalueCount; i++) {
+        if (compiler.upvalues[i].index > 255) {
+            isLongClosure = true;
+        }
+    }
+
+    if (isLongClosure) {
+        emitByte(OP_CLOSURE_LONG);
+        emitByte((uint8_t)(functionConstant & 0xff));
+        emitByte((uint8_t)((functionConstant >> 8) & 0xff));
+        emitByte((uint8_t)((functionConstant >> 16) & 0xff));
+    } else {
+        emitBytes(OP_CLOSURE, (uint8_t)functionConstant);
+    }
 
     for (int i = 0; i < function->upvalueCount; i++) {
         emitByte(compiler.upvalues[i].isLocal ? 1 : 0);
-        emitByte(compiler.upvalues[i].index);
+
+        if (isLongClosure) {
+            uint32_t index = compiler.upvalues[i].index;
+            emitByte((uint8_t)(index & 0xff));
+            emitByte((uint8_t)((index >> 8) & 0xff));
+            emitByte((uint8_t)((index >> 16) & 0xff));
+        } else {
+            // Emit 8-bit upvalue index
+            emitByte((uint8_t)compiler.upvalues[i].index);
+        }
     }
 
     free(compiler.locals);
     free(compiler.upvalues);
 }
 
+static void method() {
+    consume(TOKEN_IDENTIFIER, "Expect method name.");
+    uint32_t constant = identifierConstant(&parser.previous);
+
+    FunctionType type = TYPE_METHOD;
+    if (parser.previous.length == 4 &&
+        memcmp(parser.previous.start, "init", 4) == 0) {
+        type = TYPE_INITIALIZER;
+    }
+    function(type);
+
+    if (constant <= 255) {
+        emitBytes(OP_METHOD, (uint8_t)constant);
+    } else {
+        emitByte(OP_METHOD_LONG);
+        emitByte((uint8_t)(constant & 0xff));
+        emitByte((uint8_t)((constant >> 8) & 0xff));
+        emitByte((uint8_t)((constant >> 16) & 0xff));
+    }
+}
+
 static void classDeclaration() {
     consume(TOKEN_IDENTIFIER, "Expect class name.");
-    uint8_t nameConstant = identifierConstant(&parser.previous);
+    Token className = parser.previous;
+    uint32_t nameConstant = identifierConstant(&parser.previous);
     declareVariable();
 
-    emitBytes(OP_CLASS, nameConstant);
+    if (nameConstant <= 255) {
+        emitBytes(OP_CLASS, (uint8_t)nameConstant);
+    } else {
+        emitByte(OP_CLASS_LONG);
+        emitByte((uint8_t)(nameConstant & 0xff));
+        emitByte((uint8_t)((nameConstant >> 8) & 0xff));
+        emitByte((uint8_t)((nameConstant >> 16) & 0xff));
+    }
     defineVariable(nameConstant);
 
+    ClassCompiler classCompiler;
+    classCompiler.enclosing = currentClass;
+    currentClass = &classCompiler;
+
+    namedVariable(className, false);
     consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        method();
+    }
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+    emitByte(OP_POP);
+
+    currentClass = currentClass->enclosing;
 }
 
 static void funDeclaration() {
@@ -835,6 +929,10 @@ static void returnStatement() {
     if (match(TOKEN_SEMICOLON)) {
         emitReturn();
     } else {
+        if (current->type == TYPE_INITIALIZER) {
+            error("Can't return a value from an initializer.");
+        }
+
         expression();
         consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
         emitByte(OP_RETURN);
