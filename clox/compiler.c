@@ -338,6 +338,17 @@ static void dot(bool canAssign) {
             emitByte((uint8_t)((name >> 8) & 0xff));
             emitByte((uint8_t)((name >> 16) & 0xff));
         }
+    } else if (match(TOKEN_LEFT_PAREN)) {
+        if (name <= 255) {
+            emitBytes(OP_INVOKE, (uint8_t)name);
+        } else {
+            emitByte(OP_INVOKE_LONG);
+            emitByte((uint8_t)(name & 0xff));
+            emitByte((uint8_t)((name >> 8) & 0xff));
+            emitByte((uint8_t)((name >> 16) & 0xff));
+        }
+        uint8_t argCount = argumentList();
+        emitByte(argCount);
     } else {
         if (name <= 255) {
             emitBytes(OP_GET_PROPERTY, (uint8_t)name);
