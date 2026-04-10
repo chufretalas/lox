@@ -6,7 +6,6 @@
 #include "chunk.h"
 #include "common.h"
 #include "compiler.h"
-#include "debug.h"
 #include "memory.h"
 #include "object.h"
 #include "vm.h"
