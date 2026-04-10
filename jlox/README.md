@@ -1,34 +1,23 @@
+# jlox
+
+## Usage
+
+### REPL mode
 ```bash
 ./gradlew --console=plain run
 ```
 
+### File mode
 ```bash
 ./gradlew --console=plain run --args='../../sample_scripts/script.lox'
 ```
 
+### Running AST Generator
 ```bash
 javac app/src/main/java/dev/chufretalas/tool/GenerateAst.java && java -cp app/src/main/java/ dev.chufretalas.tool.GenerateAst app/src/main/java/dev/chufretalas/lox
 ```
 
-# jlox grammar V1
-
-expression → literal
-| unary
-| binary
-| grouping ;
-
-literal → NUMBER | STRING | "true" | "false" | "nil" ;
-
-grouping → "(" expression ")" ;
-
-unary → ( "-" | "!" ) expression ;
-
-binary → expression operator expression ;
-
-operator → "==" | "!=" | "<" | "<=" | ">" | ">="
-| "+" | "-" | "\*" | "/" ;
-
-# jlox grammar V2
+## jlox grammar
 
 ```
 program          → declaration* EOF ;
